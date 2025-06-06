@@ -1,3 +1,6 @@
 **/__pycache__/
 output/*
 test_out/*
+*.png
+*.txt
+*.jsonl

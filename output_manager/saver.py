@@ -38,9 +38,9 @@ def save_lora_weights(
     # "lora_te1_text_model.encoder.layers.22.self_attn.q_proj.lora_A.weight"
     
     component_prefix_map = {
-        "UNet": "lora_unet_",
-        "TextEncoder1": "lora_te1_",
-        "TextEncoder2": "lora_te2_"
+        "unet": "lora_unet_",
+        "text_encoder_1": "lora_te1_",
+        "text_encoder_2": "lora_te2_"
     }
 
     for component_name, component_layers in lora_weights.items():
