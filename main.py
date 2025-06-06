@@ -33,7 +33,7 @@ def main():
              "A corresponding '<model_name>_config.json' must exist in 'model_configs/'."
     )
     # Add an optional argument for the output directory/filename later if needed
-    # parser.add_argument("--output_path", type=str, default="output/generated_lora.safetensors", help="Path to save the generated LoRA weights.")
+    parser.add_argument("--output_path", type=str, default="output/generated_lora.safetensors", help="Path to save the generated LoRA weights.")
 
     args = parser.parse_args()
 
@@ -111,12 +111,14 @@ def main():
     # print("LoRA parameters optimized.") # Already printed
 
     # 7. Output/Save LoRA weights
-    output_filename = "generated_sdxl_lora.safetensors" # Changed to .safetensors
-    output_dir = "output"
-    # The saver function now creates the output directory if it doesn't exist.
-    # if not os.path.exists(output_dir):
-    #     os.makedirs(output_dir)
-    full_output_path = os.path.join(output_dir, output_filename)
+    # Use the output_path argument provided by the user
+    full_output_path = args.output_path
+    
+    # Ensure the directory for the output path exists (saver also does this, but good practice here too)
+    output_dir_from_arg = os.path.dirname(full_output_path)
+    if output_dir_from_arg and not os.path.exists(output_dir_from_arg):
+        os.makedirs(output_dir_from_arg)
+        print(f"Created output directory: {output_dir_from_arg}")
     
     metadata_to_save = {
         "prompt": text_prompt,

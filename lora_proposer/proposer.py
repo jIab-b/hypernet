@@ -77,7 +77,7 @@ Example Acknowledgment:
 def propose_initial_lora_parameters(
     processed_prompt_data: Dict[str, Any], # Output from preprocess_text
     model_config: Dict[str, Any]
-) -> Dict[str, Dict[str, torch.Tensor]]:
+) -> Dict[str, Dict[str, Dict[str, torch.Tensor]]]:
     """
     Proposes initial LoRA parameters (A and B matrices) for each target layer.
     Uses a proposer LLM to guide the generation (currently placeholder for LLM output parsing).
@@ -93,7 +93,7 @@ def propose_initial_lora_parameters(
     lora_rank = model_config.get("lora_rank", 8)
     lora_alpha = model_config.get("lora_alpha", lora_rank) # Common practice
 
-    initial_parameters: Dict[str, Dict[str, torch.Tensor]] = {}
+    initial_parameters: Dict[str, Dict[str, Dict[str, torch.Tensor]]] = {}
 
     # Define layer groups from config
     layer_groups = [
@@ -140,6 +140,9 @@ def propose_initial_lora_parameters(
         print("Placeholder: LLM interaction skipped. Using random initialization for LoRA weights.")
 
 
+        if component_name not in initial_parameters:
+            initial_parameters[component_name] = {}
+
         for layer_name in target_layers:
             if layer_name not in layer_dimensions_map:
                 # Already warned above, but double check before assignment
@@ -154,12 +157,7 @@ def propose_initial_lora_parameters(
             lora_A_tensor = torch.randn(lora_rank, in_features, device=device, dtype=torch.float32) * 0.01
             lora_B_tensor = torch.zeros(out_features, lora_rank, device=device, dtype=torch.float32)
 
-            # Store with a prefix to avoid name clashes if layers have same name in different components
-            # (though PEFT usually handles this with module paths)
-            # For our dict, let's use a clear name. The actual PEFT target module name will be precise.
-            # We can use the direct layer_name as key if they are unique across all components listed in config.
-            # For now, assume layer_name is unique enough for this dict's keys.
-            initial_parameters[layer_name] = {
+            initial_parameters[component_name][layer_name] = {
                 "lora_A": lora_A_tensor,
                 "lora_B": lora_B_tensor
             }

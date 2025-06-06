@@ -113,43 +113,89 @@ def calculate_alignment_score(
 ) -> torch.Tensor:
     """
     Calculates the alignment score (loss to be minimized).
-    Placeholder for actual conditional language modeling objective.
+    This version implements a basic prompt-conditioning by encouraging
+    LoRA-adapted text encoders to produce larger magnitude embeddings for the prompt.
     """
     original_prompt_text = processed_prompt_data["original_prompt"]
     print(f"  Calculating alignment score for prompt: '{original_prompt_text}'")
 
-    # --- Placeholder Score Calculation ---
-    # A real implementation would use the peft_models and tokenized inputs
-    # to compute a loss based on the "conditional language modeling objective".
-    # This might involve:
-    # 1. Getting embeddings from peft_text_encoder_1 and peft_text_encoder_2.
-    # 2. If a temporary LM head is added to one of them, calculate cross-entropy loss
-    #    for predicting the input prompt tokens.
-    # For now, simulate a loss that changes based on LoRA params.
-    dummy_loss = torch.tensor(0.0, device=peft_unet.device, requires_grad=True)
+    device = peft_unet.device # Assume unet is always present and on the correct device
+    total_loss = torch.tensor(0.0, device=device, requires_grad=False)
     
-    # Make loss slightly dependent on sum of LoRA params to see optimizer working
+    # Loss from Text Encoders based on prompt
+    prompt_embedding_loss = torch.tensor(0.0, device=device)
+    num_text_encoders_processed = 0
+
+    if peft_text_encoder_1 and "tokenizer_1_output" in processed_prompt_data:
+        token_data_1 = processed_prompt_data["tokenizer_1_output"]
+        input_ids_1 = token_data_1["input_ids"].to(device)
+        attention_mask_1 = token_data_1["attention_mask"].to(device)
+        
+        try:
+            outputs_1 = peft_text_encoder_1(input_ids=input_ids_1, attention_mask=attention_mask_1, output_hidden_states=True)
+            # Use last_hidden_state. We want to encourage LoRA to make this significant.
+            # A simple way is to maximize its L2 norm (or minimize negative L2 norm).
+            # Or, maximize sum of absolute values.
+            last_hidden_state_1 = outputs_1.last_hidden_state
+            # Loss = -mean(abs(embeddings)) to encourage larger values
+            prompt_embedding_loss = prompt_embedding_loss - torch.mean(torch.abs(last_hidden_state_1))
+            num_text_encoders_processed += 1
+        except Exception as e:
+            print(f"    Warning: Error processing prompt with TextEncoder1: {e}")
+
+
+    if peft_text_encoder_2 and "tokenizer_2_output" in processed_prompt_data:
+        token_data_2 = processed_prompt_data["tokenizer_2_output"]
+        input_ids_2 = token_data_2["input_ids"].to(device)
+        attention_mask_2 = token_data_2["attention_mask"].to(device)
+
+        try:
+            outputs_2 = peft_text_encoder_2(input_ids=input_ids_2, attention_mask=attention_mask_2, output_hidden_states=True)
+            last_hidden_state_2 = outputs_2.last_hidden_state
+            prompt_embedding_loss = prompt_embedding_loss - torch.mean(torch.abs(last_hidden_state_2))
+            num_text_encoders_processed += 1
+        except Exception as e:
+            print(f"    Warning: Error processing prompt with TextEncoder2: {e}")
+
+    if num_text_encoders_processed > 0:
+        total_loss = total_loss + (prompt_embedding_loss / num_text_encoders_processed) # Average if both used
+    else:
+        # If no text encoders are LoRA-adapted or processed, this part of loss is zero.
+        # This might happen if only UNet is targeted.
+        pass
+
+    # L2 regularization for LoRA weights (small penalty to prevent weights from exploding, or to encourage sparsity if negative)
+    # Here, we add a small penalty to the sum of squares of LoRA weights to keep them from growing too large.
+    # A very small weight_decay can also encourage weights to be non-zero if the main loss is pushing them down.
+    l2_reg_loss = torch.tensor(0.0, device=device)
+    regularization_strength = 1e-5 # Small regularization
+
     for peft_model_component in [peft_unet, peft_text_encoder_1, peft_text_encoder_2]:
         if peft_model_component:
             for param in peft_model_component.parameters():
                 if param.requires_grad: # Only LoRA params
-                    dummy_loss = dummy_loss + param.abs().sum() * 0.0001 # Small contribution
+                    l2_reg_loss = l2_reg_loss + torch.sum(param ** 2)
+    
+    total_loss = total_loss + regularization_strength * l2_reg_loss
 
-    # Simulate a more meaningful change based on prompt content (very arbitrary)
-    if "cat" in original_prompt_text and "astronaut" in original_prompt_text:
-        dummy_loss = dummy_loss - torch.tensor(0.1, device=peft_unet.device) # Lower loss if keywords match
-    elif "cat" in original_prompt_text:
-        dummy_loss = dummy_loss - torch.tensor(0.05, device=peft_unet.device)
+    # Ensure the final loss requires gradients.
+    # If total_loss was built from non-leaf tensors that require_grad, it should be fine.
+    # If it was all constants, make it a leaf that requires grad.
+    # The prompt_embedding_loss part should carry gradients back to text encoder LoRAs.
+    # The l2_reg_loss part should carry gradients to all LoRA params.
+    # If total_loss is a Python scalar (e.g. 0.0) and then we add tensors, it becomes a tensor.
+    # If all components were skipped, total_loss could remain a 0.0 tensor not requiring grad.
+    # However, l2_reg_loss should always make it require grad if there are trainable params.
 
-    print(f"  Dummy alignment loss: {dummy_loss.item():.4f}")
-    return dummy_loss
+    print(f"  Alignment loss: {total_loss.item():.4f} (Prompt Emb Loss part: {prompt_embedding_loss.item() if isinstance(prompt_embedding_loss, torch.Tensor) else prompt_embedding_loss:.4f}, L2 Reg Loss part: {l2_reg_loss.item():.4f})")
+    return total_loss
 
 
 def optimize_lora_parameters(
-    initial_lora_params: Dict[str, Dict[str, torch.Tensor]], # Keys are full module paths
+    initial_lora_params: Dict[str, Dict[str, Dict[str, torch.Tensor]]], # Nested: component -> layer -> {lora_A/B -> tensor}
     processed_prompt_data: Dict[str, Any],
     model_config: Dict[str, Any]
-) -> Dict[str, Dict[str, torch.Tensor]]:
+) -> Dict[str, Dict[str, Dict[str, torch.Tensor]]]:
     """
     Optimizes LoRA parameters for the given prompt using SDXL Lightning and PEFT.
     """
@@ -181,35 +227,30 @@ def optimize_lora_parameters(
     all_trainable_params = []
 
     # --- UNet LoRA ---
-    target_layers_unet_keys = model_config.get("target_layers_unet", [])
-    initial_lora_unet = {k: v for k, v in initial_lora_params.items() if k in target_layers_unet_keys}
-    if initial_lora_unet:
-        # For PEFT, target_modules should be the names of the nn.Linear, nn.Conv2d etc. layers to adapt.
-        # The keys in initial_lora_unet are these names.
+    initial_lora_unet_component_params = initial_lora_params.get("UNet", {})
+    if initial_lora_unet_component_params:
         lora_config_unet = LoraConfig(
             r=lora_rank,
             lora_alpha=lora_alpha,
-            target_modules=list(initial_lora_unet.keys()), # Use the exact layer names
+            target_modules=list(initial_lora_unet_component_params.keys()), # Use the exact layer names from this component
             lora_dropout=0.05,
             bias="none", # or "all" or "lora_only"
         )
-        peft_models["unet"] = inject_lora_and_set_weights(pipeline.unet, "UNet", lora_config_unet, initial_lora_unet, device)
+        peft_models["unet"] = inject_lora_and_set_weights(pipeline.unet, "UNet", lora_config_unet, initial_lora_unet_component_params, device)
         all_trainable_params.extend(filter(lambda p: p.requires_grad, peft_models["unet"].parameters()))
 
     # --- Text Encoder 1 LoRA ---
-    target_layers_te1_keys = model_config.get("target_layers_text_encoder", [])
-    initial_lora_te1 = {k: v for k, v in initial_lora_params.items() if k in target_layers_te1_keys}
-    if initial_lora_te1 and pipeline.text_encoder:
-        lora_config_te1 = LoraConfig(r=lora_rank, lora_alpha=lora_alpha, target_modules=list(initial_lora_te1.keys()), lora_dropout=0.05, bias="none")
-        peft_models["text_encoder_1"] = inject_lora_and_set_weights(pipeline.text_encoder, "TextEncoder1", lora_config_te1, initial_lora_te1, device)
+    initial_lora_te1_component_params = initial_lora_params.get("TextEncoder1", {})
+    if initial_lora_te1_component_params and pipeline.text_encoder:
+        lora_config_te1 = LoraConfig(r=lora_rank, lora_alpha=lora_alpha, target_modules=list(initial_lora_te1_component_params.keys()), lora_dropout=0.05, bias="none")
+        peft_models["text_encoder_1"] = inject_lora_and_set_weights(pipeline.text_encoder, "TextEncoder1", lora_config_te1, initial_lora_te1_component_params, device)
         all_trainable_params.extend(filter(lambda p: p.requires_grad, peft_models["text_encoder_1"].parameters()))
 
     # --- Text Encoder 2 LoRA ---
-    target_layers_te2_keys = model_config.get("target_layers_text_encoder_2", [])
-    initial_lora_te2 = {k: v for k, v in initial_lora_params.items() if k in target_layers_te2_keys}
-    if initial_lora_te2 and pipeline.text_encoder_2:
-        lora_config_te2 = LoraConfig(r=lora_rank, lora_alpha=lora_alpha, target_modules=list(initial_lora_te2.keys()), lora_dropout=0.05, bias="none")
-        peft_models["text_encoder_2"] = inject_lora_and_set_weights(pipeline.text_encoder_2, "TextEncoder2", lora_config_te2, initial_lora_te2, device)
+    initial_lora_te2_component_params = initial_lora_params.get("TextEncoder2", {})
+    if initial_lora_te2_component_params and pipeline.text_encoder_2:
+        lora_config_te2 = LoraConfig(r=lora_rank, lora_alpha=lora_alpha, target_modules=list(initial_lora_te2_component_params.keys()), lora_dropout=0.05, bias="none")
+        peft_models["text_encoder_2"] = inject_lora_and_set_weights(pipeline.text_encoder_2, "TextEncoder2", lora_config_te2, initial_lora_te2_component_params, device)
         all_trainable_params.extend(filter(lambda p: p.requires_grad, peft_models["text_encoder_2"].parameters()))
 
     if not all_trainable_params:
@@ -246,27 +287,32 @@ def optimize_lora_parameters(
         print(f"  Optimization iteration {i+1}/{iterations}, Loss: {loss.item():.6f}")
 
     # Extract optimized LoRA weights
-    optimized_lora_params: Dict[str, Dict[str, torch.Tensor]] = {}
+    optimized_lora_params: Dict[str, Dict[str, Dict[str, torch.Tensor]]] = {}
+    
+    # Retrieve target layer keys from model_config for mapping back
+    target_layers_unet_keys = model_config.get("target_layers_unet", [])
+    target_layers_te1_keys = model_config.get("target_layers_text_encoder", [])
+    target_layers_te2_keys = model_config.get("target_layers_text_encoder_2", [])
+
     for component_key, peft_model_component in peft_models.items():
         if peft_model_component:
-            # state_dict keys will be like 'base_model.model.TARGET_MODULE.lora_A.default.weight'
-            # We need to map these back to our original `initial_lora_params` keys.
+            if component_key not in optimized_lora_params:
+                optimized_lora_params[component_key] = {}
+
             component_lora_keys = []
             if component_key == "unet": component_lora_keys = target_layers_unet_keys
             elif component_key == "text_encoder_1": component_lora_keys = target_layers_te1_keys
             elif component_key == "text_encoder_2": component_lora_keys = target_layers_te2_keys
 
             for param_name, param_value in peft_model_component.state_dict().items():
-                if "lora_" in param_name and param_value.requires_grad: # Check if it's a LoRA parameter we trained
-                    # Example param_name: base_model.model.down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q.lora_A.default.weight
-                    # Find original_key that matches the module path part
-                    for original_key in component_lora_keys:
-                        if original_key in param_name:
+                if "lora_" in param_name and param_value.requires_grad:
+                    for original_key in component_lora_keys: # original_key is "q_proj", "down_blocks..." etc.
+                        if original_key in param_name: # Check if "q_proj" is in the full PEFT param name
                             lora_type = "lora_A" if ".lora_A." in param_name else "lora_B"
-                            if original_key not in optimized_lora_params:
-                                optimized_lora_params[original_key] = {}
-                            optimized_lora_params[original_key][lora_type] = param_value.cpu().clone() # Store on CPU
-                            print(f"  Extracted optimized {lora_type} for {original_key}, shape {param_value.shape}")
+                            if original_key not in optimized_lora_params[component_key]:
+                                optimized_lora_params[component_key][original_key] = {}
+                            optimized_lora_params[component_key][original_key][lora_type] = param_value.cpu().clone()
+                            print(f"  Extracted optimized {lora_type} for {component_key}/{original_key}, shape {param_value.shape}")
                             break
                             
     print("LoRA parameter optimization finished.")

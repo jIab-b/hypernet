@@ -1,0 +1,78 @@
+{
+    "model_name": "stabilityai/stable-diffusion-xl-base-1.0",
+    "model_variant": null,
+    "description": "Configuration for SDXL Base 1.0. Text encoder target layers use generic projection names (e.g., 'q_proj') as per PEFT best practices. UNet names are illustrative. All names/dimensions may need verification.",
+    "lora_rank": 16,
+    "lora_alpha": 16,
+    "target_module_types": ["Attention", "FeedForward"],
+    "target_layers_unet": [
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q",
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_k",
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_v",
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_out.0",
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_q",
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_k",
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_v",
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_out.0",
+        "up_blocks.3.attentions.2.transformer_blocks.0.attn1.to_q",
+        "up_blocks.3.attentions.2.transformer_blocks.0.attn1.to_k",
+        "up_blocks.3.attentions.2.transformer_blocks.0.attn1.to_v",
+        "up_blocks.3.attentions.2.transformer_blocks.0.attn1.to_out.0"
+    ],
+    "target_layers_text_encoder": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "out_proj"
+    ],
+    "target_layers_text_encoder_2": [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "out_proj"
+    ],
+    "layer_dimensions_unet": {
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q": [320, 320],
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_k": [320, 320],
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_v": [320, 320],
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_out.0": [320, 320],
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_q": [1280, 1280],
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_k": [1280, 1280],
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_v": [1280, 1280],
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_out.0": [1280, 1280],
+        "up_blocks.3.attentions.2.transformer_blocks.0.attn1.to_q": [320, 320],
+        "up_blocks.3.attentions.2.transformer_blocks.0.attn1.to_k": [320, 320],
+        "up_blocks.3.attentions.2.transformer_blocks.0.attn1.to_v": [320, 320],
+        "up_blocks.3.attentions.2.transformer_blocks.0.attn1.to_out.0": [320, 320]
+    },
+    "layer_dimensions_text_encoder": {
+        "q_proj": [768, 768],
+        "k_proj": [768, 768],
+        "v_proj": [768, 768],
+        "out_proj": [768, 768]
+    },
+    "layer_dimensions_text_encoder_2": {
+        "q_proj": [1280, 1280],
+        "k_proj": [1280, 1280],
+        "v_proj": [1280, 1280],
+        "out_proj": [1280, 1280]
+    },
+    "conditioning_signals": {
+        "sdxl_text_encoder_1_name": "openai/clip-vit-large-patch14",
+        "sdxl_text_encoder_2_name": "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k",
+        "text_embedding_dimensionality_1": 768,
+        "text_embedding_dimensionality_2": 1280,
+        "unet_in_channels": 4,
+        "unet_latent_size": [128, 128]
+    },
+    "optimization_params": {
+        "learning_rate": 5e-5,
+        "iterations": 50,
+        "optimizer_type": "AdamW",
+        "lr_scheduler_type": "cosine"
+    },
+    "proposer_llm_config": {
+        "model_name": "gpt2",
+        "max_new_tokens": 512
+    }
+}
