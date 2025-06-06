@@ -34,6 +34,7 @@ def main():
     )
     # Add an optional argument for the output directory/filename later if needed
     parser.add_argument("--output_path", type=str, default="output/generated_lora.safetensors", help="Path to save the generated LoRA weights.")
+    parser.add_argument("--iterations", type=int, default=None, help="Number of optimization iterations. Overrides value in model_config if provided.")
 
     args = parser.parse_args()
 
@@ -98,9 +99,10 @@ def main():
     # optimize_lora_parameters now expects processed_prompt_data
     try:
         optimized_lora_matrices = optimize_lora_parameters(
-            candidate_lora_matrices, # Start with the initially proposed/assembled ones
+            candidate_lora_matrices,
             processed_prompt_data,
-            model_config
+            model_config,
+            cmd_line_iterations=args.iterations # Pass the command line argument
         )
     except Exception as e:
         print(f"Failed during LoRA optimization: {e}")

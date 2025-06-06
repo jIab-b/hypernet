@@ -192,9 +192,10 @@ def calculate_alignment_score(
 
 
 def optimize_lora_parameters(
-    initial_lora_params: Dict[str, Dict[str, Dict[str, torch.Tensor]]], # Nested: component -> layer -> {lora_A/B -> tensor}
+    initial_lora_params: Dict[str, Dict[str, Dict[str, torch.Tensor]]],
     processed_prompt_data: Dict[str, Any],
-    model_config: Dict[str, Any]
+    model_config: Dict[str, Any],
+    cmd_line_iterations: Optional[int] = None
 ) -> Dict[str, Dict[str, Dict[str, torch.Tensor]]]:
     """
     Optimizes LoRA parameters for the given prompt using SDXL Lightning and PEFT.
@@ -258,7 +259,14 @@ def optimize_lora_parameters(
         return initial_lora_params # Return original if nothing to optimize
 
     opt_config = model_config.get("optimization_params", {})
-    iterations = opt_config.get("iterations", 10)
+    # Prioritize command-line iterations if provided
+    if cmd_line_iterations is not None:
+        iterations = cmd_line_iterations
+        print(f"Using command-line specified iterations: {iterations}")
+    else:
+        iterations = opt_config.get("iterations", 50) # Default from config or hardcoded
+        print(f"Using iterations from config (or default): {iterations}")
+        
     learning_rate = opt_config.get("learning_rate", 1e-4)
     optimizer_type = opt_config.get("optimizer_type", "AdamW")
 
@@ -392,7 +400,8 @@ if __name__ == '__main__':
         final_lora_params = optimize_lora_parameters(
             mock_initial_lora,
             mock_processed_prompt,
-            mock_model_cfg
+            mock_model_cfg,
+            cmd_line_iterations=mock_model_cfg["optimization_params"]["iterations"] # Pass for example consistency
         )
         print("\nOptimizer Example - Final LoRA Parameters (shapes):")
         for layer, matrices in final_lora_params.items():
