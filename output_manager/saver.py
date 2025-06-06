@@ -1,104 +1,143 @@
 """
-Saves the generated LoRA weights.
+Saves the generated LoRA weights using safetensors.
 """
 from typing import Dict, Any
-import numpy as np
+import torch
 import os
-# from safetensors.numpy import save_file # Would be used for actual safetensors saving
+from safetensors.torch import save_file
 
 def save_lora_weights(
-    lora_weights: Dict[str, Dict[str, np.ndarray]],
+    lora_weights: Dict[str, Dict[str, torch.Tensor]], # Expects PyTorch tensors
     output_path: str,
+    model_config: Dict[str, Any], # To help determine prefixes for PEFT compatibility
     metadata: Dict[str, Any] = None
 ):
     """
-    Saves the LoRA weights to a file.
-    Currently, this is a placeholder. A real implementation would likely
-    save in a standard format like .safetensors.
+    Saves the LoRA weights to a file in .safetensors format.
 
     Args:
-        lora_weights: A dictionary where keys are target layer names,
+        lora_weights: A dictionary where keys are original target layer names
+                      (e.g., "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q"),
                       and values are dictionaries with 'lora_A' and 'lora_B'
-                      LoRA matrices (numpy arrays).
-        output_path: The path to save the LoRA weights file.
-        metadata: Optional metadata to include in the saved file (e.g.,
-                  prompt, model_config details).
+                      LoRA matrices (PyTorch tensors).
+        output_path: The path to save the LoRA weights file (e.g., "output/lora.safetensors").
+        model_config: The main configuration, used to find which component (UNet, TE1, TE2)
+                      a layer belongs to, for PEFT-compatible naming.
+        metadata: Optional metadata to include in the saved file.
     """
-    print(f"Saving LoRA weights to: {output_path}")
+    print(f"Saving LoRA weights to: {output_path} using safetensors")
 
-    # Ensure output directory exists
     output_dir = os.path.dirname(output_path)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)
         print(f"Created output directory: {output_dir}")
 
-    # Placeholder for .safetensors saving
-    # For safetensors, tensors need to be prepared correctly.
-    # The structure would be something like:
-    # tensors_to_save = {}
-    # for layer_name, matrices in lora_weights.items():
-    #     # Naming convention for safetensors often includes "lora_down" for A
-    #     # and "lora_up" for B, and might include layer path.
-    #     # Example: "lora_unet_down_blocks_0_attentions_0_proj_in.lora_down.weight"
-    #     # For simplicity, we'll use a flatter structure here for the placeholder.
-    #     tensors_to_save[f"{layer_name}.lora_A"] = matrices["lora_A"]
-    #     tensors_to_save[f"{layer_name}.lora_B"] = matrices["lora_B"]
-    #
-    # if metadata:
-    #     # safetensors save_file can take a metadata dict
-    #     # save_file(tensors_to_save, output_path, metadata=metadata)
-    # else:
-    #     # save_file(tensors_to_save, output_path)
+    tensors_to_save = {}
+    # Determine component prefixes for PEFT compatibility
+    # This is a simplified way; PEFT's actual naming can be more complex.
+    # Diffusers `load_lora_weights` often expects keys like:
+    # "lora_unet_down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q.lora_A.weight"
+    # "lora_te1_text_model.encoder.layers.22.self_attn.q_proj.lora_A.weight"
     
-    # For now, let's just save as a .npz file as a placeholder
-    # to demonstrate saving the numpy arrays.
-    
-    # Prepare for npz: flatten the keys for lora_A and lora_B
-    npz_dict = {}
-    for layer_name, matrices in lora_weights.items():
-        safe_layer_name = layer_name.replace('.', '_') # Make key safe for npz
-        npz_dict[f"{safe_layer_name}_lora_A"] = matrices["lora_A"]
-        npz_dict[f"{safe_layer_name}_lora_B"] = matrices["lora_B"]
+    # Get all target layer lists from config
+    unet_layers = model_config.get("target_layers_unet", [])
+    te1_layers = model_config.get("target_layers_text_encoder", [])
+    te2_layers = model_config.get("target_layers_text_encoder_2", [])
 
-    if metadata: # np.savez doesn't directly support metadata like safetensors
-        print("Metadata (not saved in this npz placeholder):", metadata)
+    for layer_name, matrices in lora_weights.items():
+        # Determine the prefix based on which list the layer_name is in
+        prefix = "lora_unet_"
+        if layer_name in te1_layers:
+            prefix = "lora_te1_" # Assuming text_encoder is TE1
+        elif layer_name in te2_layers:
+            prefix = "lora_te2_" # Assuming text_encoder_2 is TE2
+        
+        # Ensure tensors are on CPU before saving
+        lora_A_cpu = matrices["lora_A"].cpu()
+        lora_B_cpu = matrices["lora_B"].cpu()
+
+        # Construct names compatible with what `pipeline.load_lora_weights` might expect
+        # or how PEFT saves them. This often involves replacing '.' with '_' in the prefix part.
+        # The actual layer name part should retain its dots.
+        # Example: lora_unet_down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q.lora_A.weight
+        # The `optimizer` extracts weights with `original_key` which is like `down_blocks...`
+        
+        # Standard PEFT naming convention for LoRA layers:
+        # For a layer `module_name` (e.g., `transformer_blocks.0.attn1.to_q`)
+        # LoRA A weight: `base_model.model.{module_name}.lora_A.default.weight`
+        # LoRA B weight: `base_model.model.{module_name}.lora_B.default.weight`
+        # When saving standalone LoRA, often the `base_model.model.` is stripped,
+        # and a component prefix (unet, te1, te2) is added.
+        
+        # Let's use a common convention for standalone LoRA files loaded by diffusers:
+        # {component_prefix}{original_layer_name_with_dots}.lora_A.weight
+        # {component_prefix}{original_layer_name_with_dots}.lora_B.weight
+        
+        # The `layer_name` from `lora_weights` is the `original_layer_name_with_dots`
+        tensors_to_save[f"{prefix}{layer_name}.lora_A.weight"] = lora_A_cpu
+        tensors_to_save[f"{prefix}{layer_name}.lora_B.weight"] = lora_B_cpu
+        
+        # Also save alpha if present in config (though it's often part of model loading)
+        # safetensors metadata is good for this.
+        # lora_alpha = model_config.get("lora_alpha")
+        # if lora_alpha is not None:
+        #     tensors_to_save[f"{prefix}{layer_name}.alpha"] = torch.tensor(lora_alpha, dtype=lora_A_cpu.dtype)
+
+
+    # Ensure metadata values are strings for safetensors
+    final_metadata = {}
+    if metadata:
+        for k, v in metadata.items():
+            final_metadata[k] = str(v) # Convert all metadata values to strings
 
     try:
-        np.savez(output_path, **npz_dict)
-        print(f"LoRA weights saved successfully as .npz (placeholder) to {output_path}")
+        save_file(tensors_to_save, output_path, metadata=final_metadata if final_metadata else None)
+        print(f"LoRA weights saved successfully to {output_path}")
     except Exception as e:
-        print(f"Error saving LoRA weights to {output_path}: {e}")
+        print(f"Error saving LoRA weights with safetensors to {output_path}: {e}")
+        print("Ensure you have the `safetensors` library installed.")
         raise
 
 if __name__ == '__main__':
     # Example Usage
-    sample_lora_weights = {
-        "attn.to_q": {
-            "lora_A": np.random.randn(4, 320).astype(np.float32),
-            "lora_B": np.zeros((768, 4), dtype=np.float32)
+    device_ = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    sample_lora_weights_ = {
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q": { # UNet layer
+            "lora_A": torch.randn(8, 320, dtype=torch.float32, device=device_),
+            "lora_B": torch.zeros(320, 8, dtype=torch.float32, device=device_)
         },
-        "attn.to_k": {
-            "lora_A": np.random.randn(4, 320).astype(np.float32),
-            "lora_B": np.zeros((768, 4), dtype=np.float32)
+        "text_model.encoder.layers.22.self_attn.q_proj": { # Text Encoder 1 layer
+            "lora_A": torch.randn(8, 768, dtype=torch.float32, device=device_),
+            "lora_B": torch.zeros(768, 8, dtype=torch.float32, device=device_)
         }
     }
-    sample_metadata = {
-        "prompt": "a cat astronaut",
-        "base_model": "GenericDiffusionModel-v1.0",
-        "lora_rank": 4
+    sample_metadata_ = {
+        "prompt": "a cat astronaut on the moon",
+        "base_model_name": "stabilityai/sdxl-lightning",
+        "lora_rank": 8,
+        "lora_alpha": 8,
+        "description": "Test LoRA generated by per-prompt optimizer"
     }
     
-    # Create an 'output' directory if it doesn't exist for the example
-    if not os.path.exists("output"):
-        os.makedirs("output")
+    # Mock model_config for determining prefixes
+    mock_config_for_saver = {
+        "target_layers_unet": ["down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q"],
+        "target_layers_text_encoder": ["text_model.encoder.layers.22.self_attn.q_proj"],
+        "target_layers_text_encoder_2": []
+    }
+
+    output_dir_ = "output"
+    if not os.path.exists(output_dir_):
+        os.makedirs(output_dir_)
+    output_file_path = os.path.join(output_dir_, "example_sdxl_lora.safetensors")
         
-    save_lora_weights(sample_lora_weights, "output/example_lora.npz", sample_metadata)
+    save_lora_weights(sample_lora_weights_, output_file_path, mock_config_for_saver, sample_metadata_)
     
-    # Verify save (optional)
-    try:
-        loaded_data = np.load("output/example_lora.npz")
-        print("\nVerification: Loaded keys from .npz file:")
-        for key in loaded_data.keys():
-            print(f"  - {key}, shape: {loaded_data[key].shape}")
-    except Exception as e:
-        print(f"Error during verification load: {e}")
+    # To verify, you would typically load it, e.g., with:
+    # from safetensors.torch import load_file
+    # loaded_tensors = load_file(output_file_path)
+    # print("\nVerification: Loaded tensors from .safetensors file:")
+    # for key, tensor in loaded_tensors.items():
+    #     print(f"  - {key}, shape: {tensor.shape}, dtype: {tensor.dtype}")
+    print(f"\nExample LoRA weights saved to {output_file_path}")
+    print("To verify, load with `safetensors.torch.load_file`.")
