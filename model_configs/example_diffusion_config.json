@@ -1,0 +1,42 @@
+{
+    "model_name": "GenericDiffusionModel-v1.0",
+    "description": "Example configuration for a generic diffusion model.",
+    "lora_rank": 8,
+    "target_layers": [
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q",
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_k",
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_v",
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_out.0",
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_q",
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_k",
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_v",
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_out.0",
+        "up_blocks.3.attentions.0.transformer_blocks.0.attn1.to_q",
+        "up_blocks.3.attentions.0.transformer_blocks.0.attn1.to_k",
+        "up_blocks.3.attentions.0.transformer_blocks.0.attn1.to_v",
+        "up_blocks.3.attentions.0.transformer_blocks.0.attn1.to_out.0"
+    ],
+    "layer_dimensions": {
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_q": [320, 320],
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_k": [320, 320],
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_v": [320, 320],
+        "down_blocks.0.attentions.0.transformer_blocks.0.attn1.to_out.0": [320, 320],
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_q": [640, 640],
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_k": [640, 640],
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_v": [640, 640],
+        "mid_block.attentions.0.transformer_blocks.0.attn1.to_out.0": [640, 640],
+        "up_blocks.3.attentions.0.transformer_blocks.0.attn1.to_q": [320, 320],
+        "up_blocks.3.attentions.0.transformer_blocks.0.attn1.to_k": [320, 320],
+        "up_blocks.3.attentions.0.transformer_blocks.0.attn1.to_v": [320, 320],
+        "up_blocks.3.attentions.0.transformer_blocks.0.attn1.to_out.0": [320, 320]
+    },
+    "conditioning_signals": {
+        "text_embedding_dimensionality": 768,
+        "model_architecture_type": "CLIP-based Text Encoder"
+    },
+    "optimization_params": {
+        "learning_rate": 1e-4,
+        "iterations": 100,
+        "optimizer_type": "Adam"
+    }
+}
